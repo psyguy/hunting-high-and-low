@@ -1,0 +1,486 @@
+---
+title: "Hunting high and low: On the estimation and appropriateness of cosine models for experience sampling"
+subtitle: "Reproducible Code"
+author:
+  - name: Haqiqatkhah, Mohammadhossein Manuel
+    affiliation: Utrecht University
+    affiliation-url: https://www.uu.nl/staff/MHHaqiqatkhah
+    orcid: 0000-0002-2513-3761
+  - name: Hamaker, Ellen L.
+    affiliation: Utrecht University
+    affiliation-url: https://www.uu.nl/staff/ELHamaker
+citation:
+  type: article-journal
+  title: "Hunting high and low: On the estimation and appropriateness of cosine models for experience sampling"
+  container-title: "PsyArXiv Preprints"
+  issued: 2025/01/207
+  doi: "10.31234/osf.io/7rhtv"
+  url: https://psyarxiv.com/7rhtv
+google-scholar: true
+format:
+  html:
+    code-fold: true
+    code-tools: true
+    code-overflow: scroll
+    output-file: "index.html"
+    code-line-numbers: true
+    toc: true
+    toc-location: body
+    number-sections: true
+    number-offset: 0
+    link-external-newwindow: true
+    toc-depth: 3
+    self-contained: true
+    self-contained-math: false
+    code-summary: "Click to expand the code"
+    anchor-sections: true
+    theme:
+      light: litera
+      dark: darkly
+    comments:
+      hypothesis: true
+## For html
+execute:
+  enabled: true
+  eval: true
+  echo: true
+  include: true
+  warning: false
+  error: false
+  freeze: auto
+  cache: refresh
+editor: visual
+---
+
+# Introduction
+
+This document includes codes used in conducting the analyses and generating the figures in the paper
+
+> Haqiqatkhah, M. M., & Hamaker, E. L. (2025, January 27). Hunting high and low: On the estimation and appropriateness of cosine models for experience sampling. PsyArXiv Preprints. https://doi.org/10.31234/osf.io/7rhtv
+
+The `BibTeX` citation is at the end of the document. Please cite accordingly.
+
+We cannot share the empirical data used in this paper. However, to use your own data with the current code, you must have a long dataframe (which we call `d_l`) with the following columns:
+
+-   `id`: Unique participant ID
+
+-   `t`: Time in hours within day (values between 0 and 24), or time since the start of data collection (in hours)
+
+-   `item`: The item measured variable
+
+-   `y`: Value of the item
+
+To run the code, you need `plyr`, `tidyverse`, and `ggthemes` R packages.
+
+```{r}
+#| label: initialization
+
+library(plyr)
+library(tidyverse)
+library(ggthemes)
+
+d_l <- readRDS("d_l.rds")
+
+n_individuals <- d_l$id %>% unique() %>% length()
+
+```
+
+# Defining the cosinor model
+
+We made a function `fit_cosinor_points` to obtain point estimates for the parameters of the linear and nonlinear cosinor model. In this function, we calculate the point estimates for the amplitude and the peak offset parameters naïvely, that is, we use point estimates of $\beta_c$ and $\beta_s$ to get point estimates for $A$ and $\psi$, without considering the uncertainty and confidence/credible intervals of the base and transformed parameters.
+
+In this function, by setting the argument `method`, we can determine whether to use the incorrect arctangent function (`atan`) in obtaining $\psi$, or use the proper two-argument arctangent function (`atan2`). Furthermore, to make it usable beyond ESM data, the argument `lambda` determines the length of the cycle (default: 24).
+
+```{r}
+#| label: fit_cosinor_function
+
+fit_cosinor_points <- function(d, method = "atan2", lambda = 24){
+  
+  # Define angular frequency omega for the cycle
+  omega <- 2 * pi / lambda
+  
+  # Making sure t represents time within cycle and
+  # Adding cosine and sine predictors (C_t and S_t)
+  d <- d %>%
+    mutate(t = t %% lambda,
+           c_t = cos(omega * t),
+           s_t = sin(omega * t))
+  
+  # Fit the cosinor model
+  model <- lm(y ~ c_t + s_t, d)
+  
+  # Extract parameters into a dataframe
+  estimates <- data.frame(
+    mesor = model$coefficients[[1]],
+    beta_c = model$coefficients[[2]],
+    beta_s = model$coefficients[[3]]
+  ) %>% 
+  # Adding amplitude and psi
+    mutate(
+      amp = sqrt(beta_c^2 + beta_s^2),
+      psi = (ifelse(method == "atan",
+                    atan(beta_s/beta_c),
+                    atan2(beta_s, beta_c)) / omega) %% lambda
+           ) %>% 
+  # Adding method used to the dataframe
+    mutate(method = method)
+  
+  return(estimates)
+}
+```
+
+# Fitting the model
+
+We select items `hap`, `pa`, `sad`, `na` from the dataset, and to do the analyses in the paper for different starting points of the cycle, we ad_l_used a new variable `starting_hour` to `d_l`; we replicate the dataframe three more times such that we can fit the model to the data assuming the day started at other times than midnight. We then transform `t` to correspond to time since the start of the cycle, and assure it remains between zero and 24 (using the modulo operator `%%`). We ad_l_used another column `it_id_sh`, as we intend to fit the model for all combinations of items, persons, and starting hours.
+
+```{r}
+#| label: ad_l_used_starting_times
+
+d_l_used <- d_l %>%
+  mutate(t = time_in_hours) %>% 
+  filter(
+    item %in% c("hap", "pa",
+                "sad", "na")) %>%
+  mutate(starting_hour = 0) %>%
+  bind_rows(
+    mutate(., starting_hour = 6),
+    mutate(., starting_hour = 10),
+    mutate(., starting_hour = 12)
+  ) %>%
+  mutate(t = (t - starting_hour) %% 24) %>%
+  mutate(it_id_sh = paste(item, id, starting_hour))
+```
+
+We then fit the model to the data with for each item–person–starting hour combination, and store the resulting dataframe in `ests`, and recover item name, person ID, and starting hour and ad_l_used them as new columns to the dataframe:
+
+```{r}
+#| label: fitting_cosinor
+
+ests <- d_l_used %>%
+  plyr::ddply(.(it_id_sh),
+        function(d)
+    rbind(
+      fit_cosinor_points(d, method = "atan"),
+      fit_cosinor_points(d, method = "atan2")
+    )
+    ) %>% 
+  group_by(it_id_sh) %>%
+  dplyr::mutate(item = unlist(strsplit(it_id_sh, " "))[1],
+         id = unlist(strsplit(it_id_sh, " "))[2],
+         starting_hour = unlist(strsplit(it_id_sh, " "))[3]) 
+```
+
+To make the dataframe ready for nice visualizations, we modify the columns and ad_l_used a column to indicate the percentage of times the conventional arctangent function mislocates the peak (i.e., the percent of cases whose correct peak offset estimates were between 6:00 and 18:00) and store it in `ests_comparison`:
+
+```{r}
+#| label: calculating_mislocations
+
+ests_comparison <- ests %>% 
+  mutate(starting_hour_factor = factor(
+    starting_hour,
+    c(0, 6, 10, 12),
+    paste0("Staring at ",
+    c(0, 6, 10, 12), ":00"))
+    ) %>%
+  ungroup() %>% 
+  group_by(item, starting_hour) %>%
+  mutate(
+    perc_mislocated = (100*sum(psi >= 6 & psi <= 18, na.rm = TRUE)/n_individuals) %>% round()) %>%
+  # Ungroup to avoid issues with plotting
+  ungroup() %>%
+  # Change item names and orders for a better plot
+  mutate(item = factor(item,
+           c("hap", "sad", "pa", "na"),
+           c("Happy", "Sad", "PA", "NA")),
+         method = case_when(
+           method == "atan" ~ "Calculated using the conventional arctangent function",
+           method == "atan2" ~ "Calculated using the two-argument arctangent function"
+         ))
+```
+
+# Visualizing the results
+
+## Comparing `atan` and `atan2`
+
+We plot the histograms based on `ests_comparison` comparing the results using `ggplot`:
+
+```{r}
+#| label: histograms_atan_atan2
+
+p_comparisons <- ests_comparison %>%
+  ggplot() +
+  # x here is the estimated peak time on clock hours,
+  # so starting hour needs to be added to the estimated psi
+  aes(x = (psi + as.numeric(starting_hour)) %% 24,
+      fill = method) +
+  geom_histogram(
+    bins = 48,
+    position = "identity",
+    alpha = 0.6,
+    breaks = seq(0, 24, by = 1 / 2)
+  ) +
+  facet_grid(rows = vars(starting_hour_factor),
+             cols = vars(item)) +
+  xlab("Estimated peak hour") +
+  ylab("Count") +
+  scale_x_continuous(breaks = (0:6) * 4) +
+  scale_fill_manual(values = c("brown1", "cornflowerblue")) +
+  geom_text(
+    data = . %>%
+      filter(grepl("two-", method)) %>%
+      distinct(),
+    aes(
+      label = paste0(round(perc_mislocated), "% mislocated"),
+      x = 12,
+      y = 20
+    ),
+    inherit.aes = FALSE,
+    size = 3.5,
+    hjust = 0.5
+  ) +
+  theme_tufte() +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 10),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    strip.text = element_text(size = 16)
+  ) +
+  labs(fill = NULL)
+
+ggsave("atan-vs-atan2.pdf",
+       p_comparisons,
+       width = 30,
+       height = 20,
+       units = "cm")
+
+ggsave("atan-vs-atan2.svg",
+       p_comparisons,
+       width = 30,
+       height = 20,
+       units = "cm")
+```
+
+![](atan-vs-atan2.svg){fig-align="center"}
+
+## Different trend shapes
+
+The example different trend shapes presented belonged to individuals 36, 114, 141, 39 for item Happy. To make the plot used in the paper, we make a new dataframe (`d_curve`) with the implied curve (`y_pred`) based on the estimates in `ests`, and ad_l_used the peak and trough to it.
+
+Then `d_curve` is plotted with two shades, to show the fitted and projected curves throughout the full day.
+
+```{r}
+#| label: plot_trends
+
+d_curve <- data.frame(
+  t = seq(0, 24, 0.1) %>% rep(4),
+  id = c(36, 114, 141, 39) %>% rep(241)) %>% 
+  mutate(measured_or_not = case_when(
+      t >= 10 & t <= 22 ~ "Fitted",
+      TRUE ~ "Extrapolated")) %>% 
+  left_join(ests %>% 
+              filter(item == "hap",
+                     starting_hour == 0,
+                     method == "atan2") %>% 
+              mutate(id = as.numeric(id)),
+            by = "id") %>% 
+  mutate(y_curve = mesor + amp * cos((t - psi)*2*pi/24),
+         peak = psi,
+         trough = (psi + 12) %% 24) %>% 
+  select(id, t, y_curve, mesor, peak, trough)
+
+# Making the plots
+p_trend_types <- d_l_used %>%
+  filter(item == "hap",
+         id %in% c(36, 114, 141, 39)) %>%
+  mutate(t = hour_in_day) %>%
+  select(id, t, y) %>%
+  mutate(measured_or_not = "Fitted") %>%
+  rbind(d_curve) %>%
+  mutate(id_l_used = paste("Person", id) %>%
+           factor(levels = c(
+             "Person 36", "Person 114", "Person 141", "Person 39"
+           ))) %>%
+  ggplot() +
+  aes(x = t, y = y) +
+  # Adding shades for unmeasured window
+  geom_rect(
+    xmin = 0,
+    xmax = 10,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "gray95"
+  ) +
+  geom_rect(
+    xmin = 22,
+    xmax = 24,
+    ymin = -Inf,
+    ymax = Inf,
+    fill = "gray95"
+  ) +
+  # Adding MESOR
+  geom_hline(
+    aes(yintercept = mesor),
+    lwd = 0.8,
+    alpha = 0.7,
+    linetype = "dashed"
+  ) +
+  # Adding the whole implied curve
+  geom_line(
+    aes(y = y_curve),
+    color = "cornflowerblue",
+    lwd = 1.5,
+    alpha = 0.25
+  ) +
+  # Adding the implied curve only in the measurement window
+  geom_line(
+    aes(y = y_curve),
+    color = "cornflowerblue",
+    linetype = "solid",
+    lwd = 1.5,
+    alpha = 0.9,
+    data = . %>%
+      filter(!is.na(y_curve), t >= 10 & t <= 22)
+  ) +
+  # Marking the peak
+  geom_vline(
+    aes(xintercept = peak),
+    lwd = 1.1,
+    color = "#D37620",
+    linetype = "dotted"
+  ) +
+  # Marking the trough
+  geom_vline(
+    aes(xintercept = trough),
+    lwd = 1.1,
+    color = "#FF9F5E",
+    linetype = "dotted"
+  ) +
+  # Adding data points
+  geom_point(
+    alpha = 0.65,
+    shape = 16,
+    size = 1,
+    color = "slateblue2"
+  ) +
+  ylim(0, 100) +
+  xlab("Hour") +
+  scale_x_continuous(breaks = seq(0, 24, 4), limits = c(0, 24)) +
+  facet_grid(cols = vars(id_l_used)) +
+  theme_tufte() +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 16),
+    strip.text = element_text(size = 16)
+  )
+
+# Saving the plots
+ggsave("trend-types.pdf",
+       p_trend_types,
+       width = 30,
+       height = 7.5,
+       units = "cm")
+
+ggsave("trend-types.svg",
+       p_trend_types,
+       width = 30,
+       height = 7.5,
+       units = "cm")
+```
+
+![](trend-types.svg){fig-align="center"}
+
+## Peak timing and day segments
+
+We make a new dataframe `ests_comparison_segmented` that includes a new variable `segment`, which is the label assigned to the estimated peak offset of each individual to determine which time of the day the location is projected to take place. Furthermore, the midpoints of each segment is calculated, which are used for placing the percentage numbers.
+
+```{r}
+#| label: m
+
+# Define custom shades for the day segments
+custom_palette <- c(
+  "Night time" = "#00488E", # Darkest shade for asleep time
+  "Wake-up time" = "#A2BEFF", # Medium-light shade for waking up
+  "Day time" = "cornflowerblue", # Base color for day time
+  "Bedtime" = "#1157A5"   # Darker shade for bedtime
+)
+
+ests_comparison_segmented <- ests %>%
+  filter(method == "atan2", starting_hour == "0") %>%
+  mutate(
+    day_segment = cut(
+      psi,
+      breaks = c(0, 6, 8, 22, 24),
+      labels = c("Night time", "Wake-up time", "Day time", "Bedtime"),
+      include.lowest = TRUE
+    ),
+    item = factor(item,
+           c("hap", "sad", "pa", "na"),
+           c("Happy", "Sad", "PA", "NA"))
+  )
+
+category_summaries <- ests_comparison_segmented %>%
+  group_by(day_segment, item) %>%
+  summarize(
+    percent = round(n() / n_individuals * 100, 0),
+    .groups = "drop"
+  ) %>% 
+  mutate(midpoint = case_when(
+    day_segment == "Night time" ~ 3,
+    day_segment == "Wake-up time" ~ 7,
+    day_segment == "Day time" ~ 15,
+    day_segment == "Bedtime" ~ 23
+  ))
+
+p_segmented <- ests_comparison_segmented %>% 
+  ggplot() +
+  aes(x = psi, fill = day_segment) +
+  geom_histogram(position = "identity",
+                 alpha = 0.6,
+                 breaks = seq(0, 24, by = 1 / 2)) +
+  facet_grid(cols = vars(item)) +
+  xlab("Estimated peak hour") +
+  ylab("Count") +
+  scale_x_continuous(breaks = (0:6) * 4) +
+  scale_fill_manual(values = custom_palette) +
+  theme_tufte() +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 10),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    strip.text = element_text(size = 16)
+  ) +
+  labs(fill = NULL) +
+  geom_text(
+    data = category_summaries,
+    aes(
+      x = midpoint,
+      y = 20,
+      label = paste0(percent, "%")
+    ),
+    size = 3,
+    inherit.aes = TRUE
+  ) +
+  geom_vline(xintercept = c(0, 6, 8, 22, 24),
+             linetype = "dashed",
+             colour = "grey50")
+
+
+# Saving the plots
+ggsave("atan2-segmented.pdf",
+       p_segmented,
+       width = 29,
+       height = 7.5,
+       units = "cm")
+
+ggsave("atan2-segmented.svg",
+       p_segmented,
+       width = 29,
+       height = 7.5,
+       units = "cm")
+```
+
+![](atan2-segmented.svg){fig-align="center"}
