@@ -131,10 +131,10 @@ fit_cosinor_points <- function(d, method = "atan2", lambda = 24){
 
 # Fitting the model
 
-We select items `hap`, `pa`, `sad`, `na` from the dataset, and to do the analyses in the paper for different starting points of the cycle, we ad_l_used a new variable `starting_hour` to `d_l`; we replicate the dataframe three more times such that we can fit the model to the data assuming the day started at other times than midnight. We then transform `t` to correspond to time since the start of the cycle, and assure it remains between zero and 24 (using the modulo operator `%%`). We ad_l_used another column `it_id_sh`, as we intend to fit the model for all combinations of items, persons, and starting hours.
+We select items `hap`, `pa`, `sad`, `na` from the dataset, and to do the analyses in the paper for different starting points of the cycle, we add a new variable `starting_hour` to `d_l`; we replicate the dataframe three more times such that we can fit the model to the data assuming the day started at other times than midnight. We then transform `t` to correspond to time since the start of the cycle, and assure it remains between zero and 24 (using the modulo operator `%%`). We add another column `it_id_sh`, as we intend to fit the model for all combinations of items, persons, and starting hours.
 
 ```{r}
-#| label: ad_l_used_starting_times
+#| label: add_starting_times
 
 d_l_used <- d_l %>%
   mutate(t = time_in_hours) %>% 
@@ -151,7 +151,7 @@ d_l_used <- d_l %>%
   mutate(it_id_sh = paste(item, id, starting_hour))
 ```
 
-We then fit the model to the data with for each item–person–starting hour combination, and store the resulting dataframe in `ests`, and recover item name, person ID, and starting hour and ad_l_used them as new columns to the dataframe:
+We then fit the model to the data with for each item–person–starting hour combination, and store the resulting dataframe in `ests`, and recover item name, person ID, and starting hour and add them as new columns to the dataframe:
 
 ```{r}
 #| label: fitting_cosinor
@@ -170,7 +170,7 @@ ests <- d_l_used %>%
          starting_hour = unlist(strsplit(it_id_sh, " "))[3]) 
 ```
 
-To make the dataframe ready for nice visualizations, we modify the columns and ad_l_used a column to indicate the percentage of times the conventional arctangent function mislocates the peak (i.e., the percent of cases whose correct peak offset estimates were between 6:00 and 18:00) and store it in `ests_comparison`:
+To make the dataframe ready for nice visualizations, we modify the columns and add a column to indicate the percentage of times the conventional arctangent function mislocates the peak (i.e., the percent of cases whose correct peak offset estimates were between 6:00 and 18:00) and store it in `ests_comparison`:
 
 ```{r}
 #| label: calculating_mislocations
@@ -266,7 +266,7 @@ ggsave("atan-vs-atan2.svg",
 
 ## Different trend shapes
 
-The example different trend shapes presented belonged to individuals 36, 114, 141, 39 for item Happy. To make the plot used in the paper, we make a new dataframe (`d_curve`) with the implied curve (`y_pred`) based on the estimates in `ests`, and ad_l_used the peak and trough to it.
+The example different trend shapes presented belonged to individuals 36, 114, 141, 39 for item Happy. To make the plot used in the paper, we make a new dataframe (`d_curve`) with the implied curve (`y_pred`) based on the estimates in `ests`, and add the peak and trough to it.
 
 Then `d_curve` is plotted with two shades, to show the fitted and projected curves throughout the full day.
 
