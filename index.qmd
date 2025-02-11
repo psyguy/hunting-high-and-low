@@ -75,6 +75,7 @@ To run the code, you need `plyr`, `tidyverse`, and `ggthemes` R packages.
 ```{r}
 #| label: initialization
 
+library(svglite)
 library(plyr)
 library(tidyverse)
 library(ggthemes)
